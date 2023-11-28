@@ -22,3 +22,8 @@ nuclear <- fixed_data(nuclear)
 renew <- fixed_data(renew)
 
 # Linear Regression
+library(MASS)
+library(ISLR2)
+# responder = consumption and predictor = year
+# predict the states future coal consumption based on year
+head(coal)
