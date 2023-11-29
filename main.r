@@ -1,29 +1,45 @@
 # Machine Learning Project
 # read in data - split between pages
 library(readxl)
-excel_file <- "C:/Users/avhea/Downloads/use_energy_source.xlsx"
-coal <- read_excel(excel_file, sheet = "Coal")
-gas <- read_excel(excel_file, sheet = "Natural Gas")
-petro <- read_excel(excel_file, sheet = "Petroleum")
-nuclear <- read_excel(excel_file, sheet = "Nuclear")
-renew <- read_excel(excel_file, sheet="Total Renewable Energy")
-# clean data
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+excel_file <- "C:/Users/avhea/Downloads/USA_production.xlsx"
+energy_data <- read_excel(excel_file, sheet = "Data")
+# transform data
+energy_data <- energy_data[, c("StateCode", "MSN", "1960":"2021")]
+energy_data_long <- energy_data %>%
+  pivot_longer(cols = -c(StateCode, MSN), 
+               names_to = "Year", values_to = "production") %>%
+  mutate(Year = as.integer(Year))
+# linear regression
+subset_data <- energy_data_long %>%
+  filter(MSN == "CLPRB" & StateCode != "US")
 
-fixed_data <- function(df) {
-  cleaned_df <- na.omit(df)
-  colnames(cleaned_df) <- cleaned_df[1,]
-  cleaned_df <- cleaned_df[-1, ] 
-}
+lm.fit <- lm(production ~ Year + StateCode, data = subset_data)
+summary(lm.fit)
+confint(lm.fit)
 
-coal <- fixed_data(coal)
-gas <- fixed_data(gas)
-petro <- fixed_data(petro)
-nuclear <- fixed_data(nuclear)
-renew <- fixed_data(renew)
+new_data <- data.frame(
+  Year = c(2025, 2030, 2035),
+  StateCode = rep("WI", 3)
+)
 
-# Linear Regression
-library(MASS)
-library(ISLR2)
-# responder = consumption and predictor = year
-# predict the states future coal consumption based on year
-head(coal)
+
+prediction <- predict(lm.fit, newdata = new_data, interval = "prediction")
+
+
+# plot United States energy production from 1960 to 2021
+us_data_coal <- energy_data_long %>%
+  filter(MSN == "CLPRB" & StateCode == "US")
+us_data_oil <- energy_data_long %>%
+  filter(MSN == "PAPRB" & StateCode == "US")
+us_data_renew <- energy_data_long %>%
+  filter(MSN == "REPRB" & StateCode == "US")
+ggplot() +
+  geom_point(data = us_data_coal, aes(x = Year, y = production, color = "Coal")) +
+  geom_point(data = us_data_oil, aes(x = Year, y = production, color = "Crude Oil")) +
+  geom_point(data = us_data_renew, aes(x = Year, y = production, color = "Renewable")) +
+  labs(x = "Year", y = "Production in Btu", title = "Energy Production by Source in the United States") +
+  scale_color_manual(values = c("Coal" = "blue", "Crude Oil" = "red", "Renewable" = "darkgreen"), 
+                     name = "Energy Source")
