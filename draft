@@ -1,0 +1,155 @@
+---
+title: "Final Project"
+output: word_document
+date: "2023-11-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial Data Entry
+
+Read all libaries that are used in the project.
+
+```{r cars}
+# read all libraries
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(gbm)
+library(tree)
+library(e1071)
+library(class)
+library(leaps)
+library(caret)
+library(MASS)
+# read in data - split between pages
+excel_file <- "C:/Users/avhea/Downloads/USA_production.xlsx"
+energy_data <- read_excel(excel_file, sheet = "Data")
+# label
+energy_data <- energy_data[, c("StateCode", "MSN", "1960":"2021")]
+# fix data
+energy <- energy_data %>%
+  pivot_longer(cols = -c(StateCode, MSN), 
+               names_to = "Year", values_to = "production") %>%
+  mutate(Year = as.integer(Year))
+# add highestProd (1 = renewable, 0 = non-renewable)
+max_values <- energy %>%
+  group_by(StateCode, Year) %>%
+  summarize(CLPRB_max = max(production[MSN == "CLPRB"]),
+            PAPRB_max = max(production[MSN == "PAPRB"]),
+            REPRB_max = max(production[MSN == "REPRB"])) %>%
+  mutate(highestProd = ifelse(CLPRB_max > REPRB_max | PAPRB_max > REPRB_max, 0, 1)) 
+# merge all together
+energy <- merge(energy, max_values[, c("StateCode", "Year", "highestProd")], by = c("StateCode", "Year"))
+
+```
+
+## Methods
+
+Logistic Regression, KNN, SVM, Regression, Classification Trees, Boosted Trees
+
+```{r, echo=FALSE}
+# Create a logistic regression methods
+set.seed(4)
+train_index <- createDataPartition(energy$highestProd, p = 0.7, list = FALSE)
+training_data <- energy[train_index, ]
+testing_data <- energy[-train_index, ]
+# forward stepwise for variable selection
+regfit.fwd <- regsubsets(highestProd ~ ., data = energy, method="forward", really.big = TRUE)
+summary(regfit.fwd)
+best_model_index <- which.max(summary(regfit.fwd)$adjr2)
+best_model_predictors <- names(which(summary(regfit.fwd)$outmat[best_model_index, ] != 0))
+
+glm.fits <- glm(highestProd ~ StateCode + Year + production, family=binomial, data=training_data)
+summary(glm.fits)
+# predict test
+prediction <- predict(glm.fits, newdata=testing_data, type="response")
+predict_label <- ifelse(prediction > 0.5, 1, 0)
+# compare test and train
+accuracy <- mean(predict_label == testing_data$highestProd)
+conf_matrix <- table(Actual = testing_data$highestProd, Predicted = predict_label)
+accuracy
+conf_matrix
+
+# Create a classification Tree
+energy$High <- factor(ifelse(energy$highestProd == 1, "Renewable", "Non"),
+                                levels = c("Renewable", "Non"))
+tree.energy <- tree(High ~ ., data = energy)
+set.seed(123)
+train_index <- createDataPartition(energy$highestProd, p = 0.7, list = FALSE)
+training_data <- energy[train_index, ]
+testing_data <- energy[-train_index, ]
+tree.energy <- tree(High ~  StateCode + Year + production, data = training_data)
+tree.pred <- predict(tree.energy, testing_data, type = "class")
+tree.pred <- ifelse(tree.pred == "Renewable", 1, 0)
+confusion_matrix <- table(tree.pred, testing_data$highestProd)
+accuracy <- mean(predict_label == testing_data$highestProd)
+accuracy
+
+# KNN
+set.seed(125)
+train_index <- createDataPartition(energy$highestProd, p = 0.7, list = FALSE)
+
+train.X <- cbind(energy$production, energy$Year)[train_index,]
+test.X <- cbind(energy$production, energy$Year)[-train_index,]
+train.Direction <- energy$highestProd[train_index]
+knn.pred <- knn(train.X, test.X, train.Direction, k=1)
+accuracy <- mean(knn.pred == energy$highestProd[-train_index])
+table(knn.pred, energy$highestProd[-train_index])
+
+# LDA
+set.seed(6)
+train_index <- createDataPartition(energy$highestProd, p = 0.7, list = FALSE)
+lda.fit <- lda(highestProd ~ StateCode + Year + production, data=energy, subset=train_index)
+lda.pred <- predict(lda.fit, testing_data)
+lda.class <- lda.pred$class
+table(lda.class, energy$highestProd[-train_index])
+accuracy <- mean(lda.class == energy$highestProd[-train_index])
+accuracy
+
+# Naive Bayes
+set.seed(7)
+train_index <- createDataPartition(energy$highestProd, p = 0.7, list = FALSE)
+nb.fit <- naiveBayes(highestProd ~ StateCode + Year + production, data=energy, subset=train_index)
+nb.class <- predict(nb.fit, energy[-train_index,])
+table(nb.class, energy$highestProd[-train_index])
+mean(nb.class == energy$highestProd[-train_index])
+```
+
+
+
+## Including Plots
+
+plots for the paper
+
+```{r pressure, echo=FALSE}
+# Create a logistic regression plots
+ggplot(testing_data, aes(x = Year, y = highestProd)) +
+  geom_point(aes(color = prediction), alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "blue") +
+  labs(x = "Year", y = "Highest Energy Production", color = "Predicted Probabilities") + 
+  ggtitle("Highest Energy Production over Years") +
+  theme_minimal()
+ggplot(testing_data, aes(x = prediction, y = highestProd)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Predicted Probabilities", y = "Actual Outcome") + 
+  ggtitle("Logistic Regression Plot") +
+  theme_minimal()
+
+
+# plot all states non-renewable vs renewable energy
+us_data_non <- energy %>%
+  filter(MSN == "CLPRB" | MSN == "PAPRB" & StateCode != "US")
+us_data_renew <- energy %>%
+  filter(MSN == "REPRB" & StateCode != "US")
+ggplot() +
+  geom_point(data = us_data_non, aes(x = Year, y = production, color = "Non Renewable")) +
+  geom_point(data = us_data_renew, aes(x = Year, y = production, color = "Renewable")) +
+  labs(x = "Year", y = "Production in Btu", title = "Energy Production by Source in each State") +
+  scale_color_manual(values = c("Non Renewable" = "red", "Renewable" = "darkgreen"), name = "Energy Source")
+```
+
